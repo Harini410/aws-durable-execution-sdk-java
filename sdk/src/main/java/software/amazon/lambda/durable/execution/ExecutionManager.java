@@ -77,6 +77,7 @@ public class ExecutionManager implements SafeCloseable {
     private final CompletableFuture<Void> executionExceptionFuture = new CompletableFuture<>();
     // Guarded by activeThreads so starting a checkpoint request is atomic with the last-thread suspension decision.
     private int checkpointRequestsInFlight;
+    private volatile IllegalDurableOperationException invalidSuspensionException;
 
     /**
      * Per-wait state used to coordinate the caller thread with the future completion callback.
@@ -556,8 +557,18 @@ public class ExecutionManager implements SafeCloseable {
             default -> false;
         });
 
-        if (!hasAnyPendingOperation) {
-            logger.warn("Invalid suspension. No operation is pending");
+        if (!hasAnyPendingOperation && !isCheckpointTokenRevoked()) {
+            var waitingOperations = registeredOperations.values().stream()
+                    .filter(op -> !op.getCompletionFuture().isDone())
+                    .map(op -> String.format(
+                            "%s (id=%s)", Objects.toString(op.getName(), "<unnamed>"), op.getOperationId()))
+                    .distinct()
+                    .toList();
+
+            var errorMessage = "Invalid suspension. No operation is pending. Suspended threads were waiting for: "
+                    + waitingOperations;
+            logger.error(errorMessage);
+            this.invalidSuspensionException = new IllegalDurableOperationException(errorMessage, true);
         }
     }
 
@@ -668,6 +679,14 @@ public class ExecutionManager implements SafeCloseable {
      */
     public boolean isExecutionCompletedExceptionally() {
         return executionExceptionFuture.isCompletedExceptionally();
+    }
+
+    public IllegalDurableOperationException getInvalidSuspensionException() {
+        return invalidSuspensionException;
+    }
+
+    public boolean isCheckpointTokenRevoked() {
+        return checkpointManager.isCheckpointTokenRevoked();
     }
 
     private void stopAllOperations(Throwable cause) {

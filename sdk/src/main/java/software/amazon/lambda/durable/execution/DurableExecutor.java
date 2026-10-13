@@ -127,6 +127,21 @@ public class DurableExecutor {
 
                                 // return PENDING if it's SuspendExecutionException
                                 if (cause instanceof SuspendExecutionException) {
+                                    var invalidSuspensionException = executionManager.getInvalidSuspensionException();
+                                    if (invalidSuspensionException != null) {
+                                        fireOnInvocationEnd(
+                                                pluginRunner,
+                                                executionManager,
+                                                requestId,
+                                                executionArn,
+                                                isFirstInvocation,
+                                                InvocationStatus.RETRYING,
+                                                invalidSuspensionException,
+                                                pluginExecutionInput.get(),
+                                                null);
+                                        throw invalidSuspensionException;
+                                    }
+
                                     fireOnInvocationEnd(
                                             pluginRunner,
                                             executionManager,

@@ -44,6 +44,11 @@ class CheckpointManager {
     private final BooleanSupplier tryStartCheckpointProcessing;
     private final Runnable finishCheckpointProcessing;
     private String checkpointToken;
+    private volatile boolean checkpointTokenRevoked;
+
+    boolean isCheckpointTokenRevoked() {
+        return checkpointTokenRevoked;
+    }
 
     CheckpointManager(
             DurableConfig config,
@@ -229,6 +234,9 @@ class CheckpointManager {
 
                 // Notify callback of completion
                 checkpointToken = response.checkpointToken();
+                if (checkpointToken == null) {
+                    checkpointTokenRevoked = true;
+                }
                 if (response.newExecutionState() != null) {
                     // fetch all pages of operations
                     var operations = fetchAllPages(response.newExecutionState());
