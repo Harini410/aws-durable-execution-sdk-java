@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -44,6 +45,7 @@ import software.amazon.lambda.durable.model.OperationSubType;
 import software.amazon.lambda.durable.operation.BaseDurableOperation;
 import software.amazon.lambda.durable.plugin.DurableExecutionPlugin;
 import software.amazon.lambda.durable.plugin.InvocationEndInfo;
+import software.amazon.lambda.durable.plugin.InvocationInfo;
 import software.amazon.lambda.durable.plugin.InvocationStatus;
 
 class DurableExecutionTest {
@@ -422,7 +424,12 @@ class DurableExecutionTest {
                 (userInput, ctx) -> ctx.step("test1", String.class, stepCtx -> "Result 1: " + userInput),
                 config);
 
-        assertEquals(ExecutionStatus.SUCCEEDED, output1.status());
+        assertEquals(
+                ExecutionStatus.SUCCEEDED,
+                output1.status(),
+                () -> output1.error() == null
+                        ? "No error payload"
+                        : output1.error().errorType() + ": " + output1.error().errorMessage());
         assertFalse(sharedExecutor.isShutdown(), "Executor should not be shutdown after first execution");
 
         // Create second input with different execution operation
@@ -451,7 +458,12 @@ class DurableExecutionTest {
                 (userInput, ctx) -> ctx.step("test2", String.class, stepCtx -> "Result 2: " + userInput),
                 config);
 
-        assertEquals(ExecutionStatus.SUCCEEDED, output2.status());
+        assertEquals(
+                ExecutionStatus.SUCCEEDED,
+                output2.status(),
+                () -> output2.error() == null
+                        ? "No error payload"
+                        : output2.error().errorType() + ": " + output2.error().errorMessage());
         assertFalse(sharedExecutor.isShutdown(), "Executor should not be shutdown after second execution");
 
         // Verify both executions completed successfully and used the same executor
@@ -512,6 +524,9 @@ class DurableExecutionTest {
         assertTrue(exception.getMessage().contains("my-waiting-op"));
         assertEquals(InvocationStatus.RETRYING, plugin.invocationStatus);
         assertEquals(exception, plugin.invocationError);
+        assertNotNull(plugin.startThread);
+        assertSame(plugin.startThread, plugin.endThread);
+        assertEquals(1, plugin.endCalls);
     }
 
     @Test
@@ -557,14 +572,27 @@ class DurableExecutionTest {
         assertEquals(ExecutionStatus.PENDING, output.status());
         assertEquals(InvocationStatus.PENDING, plugin.invocationStatus);
         assertNull(plugin.invocationError);
+        assertNotNull(plugin.startThread);
+        assertSame(plugin.startThread, plugin.endThread);
+        assertEquals(1, plugin.endCalls);
     }
 
     private static class RecordingPlugin implements DurableExecutionPlugin {
         private InvocationStatus invocationStatus;
         private Throwable invocationError;
+        private Thread startThread;
+        private Thread endThread;
+        private int endCalls;
+
+        @Override
+        public void onInvocationStart(InvocationInfo info) {
+            startThread = Thread.currentThread();
+        }
 
         @Override
         public void onInvocationEnd(InvocationEndInfo info) {
+            endThread = Thread.currentThread();
+            endCalls++;
             this.invocationStatus = info.invocationStatus();
             this.invocationError = info.executionError();
         }
